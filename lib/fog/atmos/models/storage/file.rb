@@ -59,24 +59,34 @@ module Fog
 
         # By default, expire in 5 years
         def public_url(expires = (Time.now + 5 * 365 * 24 * 60 * 60))
-          file = directory.files.head(key)
-          self.objectid = if file && file.to_s.strip != "" then file.attributes['x-emc-meta'].scan(/objectid=(\w+),/).flatten[0] else nil end
-          if self.objectid && self.objectid.to_s.strip != ""
-            klass = service.ssl? ? URI::HTTPS : URI::HTTP
-            uri = klass.build(:host => service.host, :port => service.port.to_i, :path => "/rest/objects/#{self.objectid}" )
+          requires :objectid, :directory
+          # TODO - more efficient method to get this?
+          storage = connection
+          
+          #This is to get around the issue of square brackets in a file name, preventing download of the file.
+          safe_key = key.gsub(/[\[]/,'%5B').gsub(/[\]]/,'%5D')
+      
+          Fog::Storage::Atmos
+          # Build a public URL that will be sent such that the client's web browser can
+          # retrieve the file directly using the NAMESPACE method (instead of Object ID):
+          uri = URI::HTTPS.build(
+            :scheme => Fog::Storage::Ninefold::STORAGE_SCHEME,
+            :host => Fog::Storage::Ninefold::STORAGE_HOST,
+            :port => Fog::Storage::Ninefold::STORAGE_PORT.to_i,
+            :path => "/rest/namespace/#{directory.key}#{safe_key}"
+          )
+          connection.uid
 
-            sb = "GET\n"
-            sb += uri.path.downcase + "\n"
-            sb += service.uid + "\n"
-            sb += String(expires.to_i())
+          sb = "GET\n"
+          sb += uri.path.downcase + "\n"
+          sb += storage.uid + "\n"
+          sb += String(expires.to_i())
 
-            signature = service.sign( sb )
-            uri.query = "uid=#{CGI::escape(service.uid)}&expires=#{expires.to_i()}&signature=#{CGI::escape(signature)}"
-            uri.to_s
-          else
-            nil
-          end
+          signature = storage.sign( URI.unescape(sb) )
+          uri.query = "uid=#{CGI::escape(storage.uid)}&expires=#{expires.to_i()}&signature=#{CGI::escape(signature)}"
+          uri.to_s
         end
+
 
         def save(options = {})
           requires :body, :directory, :key
